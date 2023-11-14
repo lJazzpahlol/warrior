@@ -1,0 +1,279 @@
+using System.Linq;
+using System.Diagnostics;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
+using AimsharpWow.API; // Needed to access Aimsharp API
+
+namespace AimsharpWow.Modules
+{
+    public class ClassicWarrior : Rotation
+    {
+        // List of Warrior spells and abilities
+        List<string> SpellsList = new List<string>
+        {
+            "Charge", "Rend", "Heroic Strike", "Overpower", "Thunder Clap", 
+            "Victory Rush", "Demoralizing Shout", "Cleave", "Execute", 
+            "Mortal Strike", "Bloodthirst", "Whirlwind", "Sunder Armor",
+			"AutoAttack"
+        };
+
+        // List of Warrior buffs
+        List<string> BuffsList = new List<string>
+        {
+            "Battle Shout"
+        };
+
+        // List of Warrior debuffs applied to enemies
+        List<string> DebuffsList = new List<string>
+        {
+            "Rend", "Thunder Clap", "Demoralizing Shout", "Sunder Armor"
+        };
+		
+		List<string> CustomCommandsList = new List<string>
+		{
+			"ChargeOn", "HamOn"
+		};
+
+        public override void LoadSettings()
+        {
+            // Settings can be configured here
+            Settings.Add(new Setting("Game Client Language", new List<string>() { "English" }, "English"));
+        }
+
+        public override void Initialize()
+        {
+			
+			
+			Aimsharp.Latency = 200;
+            Aimsharp.QuickDelay = 150;
+            Aimsharp.SlowDelay = 350;
+			
+			//Macros
+			Macros.Add("AutoAttack", "/startattack");
+			
+			// Initialize spells, buffs, and debuffs
+            foreach (string Spell in SpellsList)
+            {
+                Spellbook.Add(Spell);
+            }
+            foreach (string Buff in BuffsList)
+            {
+                Buffs.Add(Buff);
+            }
+            foreach (string Debuff in DebuffsList)
+            {
+                Debuffs.Add(Debuff);
+            }
+			foreach (string CustomCommand in CustomCommandsList)
+			{
+				CustomCommands.Add(CustomCommand);
+			}
+
+            // Additional initialization logic can be added here
+        }
+
+        // The rotation methods will be added in subsequent parts
+		// Inside the ClassicWarrior class
+
+		public override bool CombatTick()
+		{
+			return WarriorRotation();
+		}
+		
+		// Inside the ClassicWarrior class
+		private static Stopwatch autoAttackTimer = new Stopwatch();
+
+		private bool WarriorRotation()
+		{
+			int playerLevel = Aimsharp.GetPlayerLevel();
+			int currentRage = Aimsharp.PlayerMaxPower(); // Assuming this returns the current Rage value
+			int targetHealth = Aimsharp.TargetCurrentHP() * 1000; // Convert to actual health value
+			int targetMaxHealth = Aimsharp.TargetMaxHP() * 1000; // Convert to actual max health value
+			int ThealthPercentage = (targetHealth * 100) / targetMaxHealth;
+			int enemiesInMelee = Aimsharp.EnemiesInMelee();
+			int PhealthPercentage = Aimsharp.Health("player");
+			bool isMoving = Aimsharp.PlayerIsMoving();
+			bool hamstringMode = Aimsharp.IsCustomCodeOn("HamOn");
+
+			if (!Aimsharp.TargetIsEnemy() || Aimsharp.Health("target") == 0 || Aimsharp.Range("target") > 5)
+				return false;
+
+			// Auto Attack logic
+			if (!autoAttackTimer.IsRunning && Aimsharp.Range("target") <= 5)
+			{
+				Aimsharp.Cast("AutoAttack"); // Start auto attack on entering combat
+				autoAttackTimer.Start(); 
+				return true;
+			}
+			else if (autoAttackTimer.ElapsedMilliseconds > 3000 && Aimsharp.Range("target") <= 5) // Check if 3 seconds have passed
+			{
+				Aimsharp.Cast("AutoAttack"); // Continue auto attack every 3 seconds
+				autoAttackTimer.Restart();
+				return true;
+			}
+			else
+			{
+				autoAttackTimer.Reset(); // Reset the timer when out of combat
+			}
+
+			// Rotation abilities logic
+			if (Aimsharp.CanCast("Battle Shout") && !Aimsharp.HasBuff("Battle Shout"))
+			{
+				Aimsharp.Cast("Battle Shout");
+				return true;
+			}
+			
+			if (Aimsharp.CanCast("Overpower", "target") && Aimsharp.Range("target") <= 5)
+			{
+				Aimsharp.Cast("Overpower");
+				return true;
+			}
+			
+			if (UseHeroicStrikeToFinish(currentRage))
+			{
+				return true;
+			}
+			
+			if (enemiesInMelee >= 3)
+			{
+				if (currentRage >= 10 && Aimsharp.CanCast("Demoralizing Shout") && !Aimsharp.HasDebuff("Demoralizing Shout", "target") && PhealthPercentage < 90)
+				{
+					Aimsharp.Cast("Demoralizing Shout");
+					return true;
+				}
+
+				if (playerLevel >= 20 && currentRage >= 20 && Aimsharp.CanCast("Thunder Clap") && !Aimsharp.HasDebuff("Thunder Clap", "target"))
+				{
+					Aimsharp.Cast("Thunder Clap");
+					return true;
+				}
+			}
+
+			if (playerLevel < 36 && Aimsharp.CanCast("Rend", "target") && !Aimsharp.HasDebuff("Rend", "target") && ThealthPercentage > 80)
+			{
+				Aimsharp.Cast("Rend");
+				return true;
+			}
+			if (isMoving && Aimsharp.CanCast("Hamstring", "target") && currentRage >= 10 && currentRage >= 25 && hamstringMode)
+			{
+				Aimsharp.Cast("Hamstring");
+				return true;
+			}
+
+			// Sunder Armor logic based on player level and target health percentage
+			if (playerLevel >= 22 && playerLevel < 40 && Aimsharp.CanCast("Sunder Armor", "target") && ThealthPercentage > 50 && currentRage >= 15)
+			{
+				Aimsharp.Cast("Sunder Armor");
+				return true;
+			}
+			if (playerLevel >= 46 && Aimsharp.CanCast("Sunder Armor", "target") && ThealthPercentage > 80)
+			{
+				Aimsharp.Cast("Sunder Armor");
+				return true;
+			}
+
+			// Mortal Strike logic (available at level 40)
+			if (playerLevel >= 40 && Aimsharp.CanCast("Mortal Strike", "target") && currentRage >= 30)
+			{
+				Aimsharp.Cast("Mortal Strike");
+				return true;
+			}
+
+			// Whirlwind logic (without AoE check)
+			if (playerLevel >= 36 && Aimsharp.CanCast("Whirlwind", "target") && currentRage >= 25)
+			{
+				Aimsharp.Cast("Whirlwind");
+				return true;
+			}
+
+			// Heroic Strike logic
+			if (Aimsharp.CanCast("Heroic Strike") && currentRage > 80) // Adjust Rage threshold as needed
+			{
+				Aimsharp.Cast("Heroic Strike");
+				return true;
+			}
+
+			return false;
+		}
+		
+		private int GetHeroicStrikeDamage(int playerLevel)
+		{
+			// Approximate damage for each rank of Heroic Strike
+			// These values should be adjusted based on your character's average damage for each rank
+			if (playerLevel >= 48) return 145; // Rank 8
+			if (playerLevel >= 40) return 120; // Rank 7
+			if (playerLevel >= 32) return 105; // Rank 6
+			if (playerLevel >= 24) return 88;  // Rank 5
+			if (playerLevel >= 20) return 78;  // Rank 4
+			if (playerLevel >= 16) return 62;  // Rank 3
+			if (playerLevel >= 10) return 40;  // Rank 2
+			return 15;                         // Rank 1
+		}
+
+		private bool UseHeroicStrikeToFinish(int currentRage)
+		{
+			int targetCurrentHealth = Aimsharp.TargetCurrentHP() * 1000; // Current health in actual value
+			int playerLevel = Aimsharp.GetPlayerLevel();
+			int estimatedDamage = GetHeroicStrikeDamage(playerLevel);
+
+			if (Aimsharp.CanCast("Heroic Strike") && currentRage > 15 && targetCurrentHealth <= estimatedDamage)
+			{
+				Aimsharp.Cast("Heroic Strike");
+				return true;
+			}
+
+			return false;
+		}
+
+
+
+
+
+			// Inside the ClassicWarrior class
+
+		public override bool OutOfCombatTick()
+		{
+			int playerLevel = Aimsharp.GetPlayerLevel();
+			bool chargeMode = Aimsharp.IsCustomCodeOn("ChargeOn");
+
+			// Applying Battle Shout if it's not active
+			if (Aimsharp.CanCast("Battle Shout") && !Aimsharp.HasBuff("Battle Shout", "player"))
+			{
+				Aimsharp.Cast("Battle Shout");
+				return true;
+			}
+			
+			// Auto Attack logic
+			if (!autoAttackTimer.IsRunning && Aimsharp.Range("target") <= 5)
+			{
+				Aimsharp.Cast("AutoAttack"); // Start auto attack on entering combat
+				autoAttackTimer.Start(); 
+				return true;
+			}
+			else if (autoAttackTimer.ElapsedMilliseconds > 3000 && Aimsharp.Range("target") <= 5) // Check if 3 seconds have passed
+			{
+				Aimsharp.Cast("AutoAttack"); // Continue auto attack every 3 seconds
+				autoAttackTimer.Restart();
+				return true;
+			}
+			else
+			{
+				autoAttackTimer.Reset(); // Reset the timer when out of combat
+			}
+
+			// Using Charge to initiate combat if the target is an enemy and within range
+			if (playerLevel >= 4 && Aimsharp.CanCast("Charge", "target") && chargeMode && Aimsharp.TargetIsEnemy() && Aimsharp.Range("target") <= 25 && Aimsharp.Range("target") >= 8)
+			{
+				Aimsharp.Cast("Charge");
+				return true;
+			}
+
+			// Additional out-of-combat logic can be added here
+			// ...
+
+			return false;
+		}
+
+    }
+}
